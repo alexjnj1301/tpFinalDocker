@@ -1,93 +1,3 @@
-
-# Configuration des 4 VMs pour le Déploiement de BookStack
-
-## 7. **Créer et Configurer les 4 VMs**
-
-### Configuration des Rôles
-| Rôle                    | Nom recommandé | Configuration spécifique                     |
-|--------------------------|----------------|----------------------------------------------|
-| Application (réplica 1)  | `app-replica-1`| Volume partagé pour les fichiers uploadés.   |
-| Application (réplica 2)  | `app-replica-2`| Idem que `app-replica-1`.                    |
-| Reverse Proxy            | `reverse-proxy`| Expose les ports 80/443 pour l’accès externe.|
-| Base de données + Redis  | `db-redis`     | Volume supplémentaire pour les données.      |
-
-### Étapes de Configuration des VMs
-
-#### 1. Application (Réplicas 1 et 2)
-1. Installez Docker et Docker Compose :
-   ```bash
-   sudo apt update && sudo apt install -y docker.io docker-compose
-   ```
-2. Configurez un volume partagé pour les fichiers uploadés par les utilisateurs :
-   - Installez le client NFS :
-     ```bash
-     sudo apt install -y nfs-common
-     ```
-   - Montez le stockage partagé :
-     ```bash
-     sudo mount -t nfs <IP_NFS_SERVER>:/srv/nfs_share /mnt/shared-storage
-     ```
-   - Ajoutez au fichier `/etc/fstab` pour un montage automatique au démarrage :
-     ```
-     <IP_NFS_SERVER>:/shared /mnt/shared-storage nfs defaults 0 0
-     ```
-3. Placez le fichier `docker-compose.yml` pour déployer l’application BookStack.
-4. Démarrez le conteneur :
-   ```bash
-   docker-compose up -d
-   ```
-
-#### 2. Reverse Proxy
-1. Installez Docker et Docker Compose :
-   ```bash
-   sudo apt update && sudo apt install -y docker.io docker-compose
-   ```
-2. Placez le fichier `docker-compose.yml` pour Traefik ou Nginx.
-3. Démarrez le reverse proxy :
-   ```bash
-   docker-compose up -d
-   ```
-4. Configurez les règles de pare-feu pour n’autoriser que les ports 80 et 443 en accès externe.
-
-#### 3. Base de Données + Redis
-1. Installez Docker et Docker Compose :
-   ```bash
-   sudo apt update && sudo apt install -y docker.io docker-compose
-   ```
-2. Créez un volume local pour les données de la base de données :
-   ```bash
-   mkdir -p /mnt/db_data
-   ```
-3. Placez le fichier `docker-compose.yml` pour MariaDB et Redis.
-4. Démarrez les services :
-   ```bash
-   docker-compose up -d
-   ```
-5. Configurez des sauvegardes automatiques :
-   - Ajoutez un cron job pour effectuer des sauvegardes régulières :
-     ```bash
-     crontab -e
-     ```
-     Exemple de commande pour une sauvegarde quotidienne :
-     ```bash
-     0 2 * * * docker exec mariadb sh -c 'exec mysqldump -u root -p"rootpassword" bookstack' > /backups/backup.sql
-     ```
-
----
-
-### Vérification
-1. Vérifiez que chaque VM peut communiquer avec les autres via leurs IP privées.
-2. Testez le bon fonctionnement des services Docker sur chaque VM :
-   ```bash
-   docker ps
-   ```
-3. Testez la montée en charge en déconnectant un des réplicas pour vérifier la résilience.
-
-
-
-# ca c'est suite 
-
-
 # Documentation: Déploiement de BookStack en Haute Disponibilité
 
 ## Prérequis
@@ -96,23 +6,134 @@ Avant de commencer, assurez-vous d’avoir les éléments suivants :
 - Serveurs physiques ou machines virtuelles disponibles (minimum 4) :
   - **Serveur 1 et 2** : Hébergement des réplicas de l’application BookStack.
   - **Serveur 3** : Reverse proxy (Traefik ou Nginx).
-  - **Serveur 4** : Base de données MySQL/MariaDB et Redis.
+  - **Serveur 4** : Base de données MySQL/MariaDB.
 - Accès SSH à tous les serveurs.
 - Docker et Docker Compose installés sur chaque serveur.
 - Une solution de stockage partagé entre les réplicas (NFS, GlusterFS, ou autre).
 - Domaine configuré avec un certificat SSL.
 
----
+# Configuration des 4 VMs pour le Déploiement de BookStack
 
-## Étapes du Déploiement
+## 7. **Créer et Configurer les 4 VMs**
 
-### 1. Configuration du Reverse Proxy
+### Configuration des Rôles
+| Rôle                     | Nom recommandé | Configuration spécifique                     |
+|--------------------------|----------------|----------------------------------------------|
+| Application (réplica 1)  | `app-replica-1`| Volume partagé pour les fichiers uploadés.   |
+| Application (réplica 2)  | `app-replica-2`| Idem que `app-replica-1`.                    |
+| Reverse Proxy            | `reverse-proxy`| Expose les ports 80/443 pour l’accès externe.|
+| Base de données          | `db-mariadb`   | Volume supplémentaire pour les données.      |
 
-#### Installation de Nginx
+### Étapes de Configuration des VMs
 
-1. Connectez-vous au serveur du reverse proxy.
-2. Créez un fichier `docker-compose.yml` pour Nginx :
+#### 1. Application (Réplicas 1 et 2)
+1. Installer Docker et Docker Compose :
+   ```bash
+    sudo apt update
+    sudo apt install -y docker.io docker-compose
+    sudo systemctl enable --now docker
+    sudo usermod -aG docker $USER
+   ```
+2. Configurez un volume partagé pour les fichiers uploadés par les utilisateurs :
+   - Installer le client NFS :
+     ```bash
+     sudo apt install -y nfs-common
+     ```
+   - Créer un répertoire partagé : (sur nfs serveur)
+    ```bash
+      sudo mkdir -p /srv/nfs_share
+      sudo chmod 777 /srv/nfs_share
+      sudo mkdir -p /srv/nfs_share/uploads /srv/nfs_share/db_data
+      sudo chown nobody:nogroup /srv/nfs_share/uploads /srv/nfs_share/db_data
+      sudo chmod 777 /srv/nfs_share/uploads /srv/nfs_share/db_data
+      echo "/srv/nfs_share *(rw,sync,no_root_squash,no_subtree_check)" | sudo tee /etc/exports
+      sudo exportfs -a
+      sudo systemctl restart nfs-server
+    ```
+    - Ouvrir le fichier /etc/exports puis ajouter la ligne suivante pour partager le répertoire avec vos autres VMs et sauvegarder :
+    ```bash
+      sudo nano /etc/exports
+      /srv/nfs_share 192.168.64.0/24(rw,sync,no_subtree_check)
+      sudo exportfs -a
+      sudo systemctl restart nfs-kernel-server
+    ```
+    - Vérfier les exportations : 
+    ```bash
+      sudo exportfs -v
+    ```
+    - Créer un point de montage :
+    ```bash
+      sudo mkdir -p /mnt/nfs-shared
+    ```
+   - Monter le stockage partagé et vérifier le montage :
+     ```bash
+     sudo mount -t nfs <IP_NFS_SERVER>:/srv/nfs_share /mnt/nfs-shared
+     ls /mnt/nfs-shared
+     ```
+    - Montage des Répertoires Partagés sur les VMs
+      Sur les autres VMs :
+      ```bash
+      sudo mkdir -p /mnt/shared-storage/uploads /mnt/db_data
+      sudo mount -t nfs 192.168.64.5:/srv/nfs_share/uploads /mnt/shared-storage/uploads
+      sudo mount -t nfs 192.168.64.5:/srv/nfs_share/db_data /mnt/db_data
+      ```
 
+   - Ajoutez au fichier pour un montage automatique au démarrage :
+     ```
+     <IP_NFS_SERVER>:/srv/nfs_share /mnt/nfs-shared nfs defaults 0 0
+     ```
+    - Tester et vérifier : 
+    ```bash 
+      echo "Test depuis VM cliente" > /mnt/nfs-shared/test.txt
+    ```
+    - Assurez-vous que le fichier est visible depuis d'autres VMs :
+    ```bash
+      cat /mnt/nfs-shared/test.txt
+    ```
+    - Exportation dans /etc/exports : (sur serveur)
+    ```bash
+      /srv/nfs_share 192.168.64.0/24(rw,sync,no_subtree_check)
+    ```
+3. Placez le fichier `docker-compose.yml` pour déployer l’application BookStack.
+```yaml
+version: '3.8'
+
+services:
+  bookstack:
+    image: linuxserver/bookstack
+    container_name: bookstack_replica
+    environment:
+      - DB_HOST=192.168.64.6 # IP de la VM base de données
+      - DB_USER=bookstack
+      - DB_PASS=password
+      - DB_DATABASE=bookstack
+      - APP_URL=http://192.168.64.4 # URL du reverse proxy
+      - APP_KEY=base64:BE4aoEklcVGIb+cLYOauITaK4RJEOAFq5y64t/eodOo= #docker run -it --rm --entrypoint /bin/bash lscr.io/linuxserver/bookstack:latest appkey
+    volumes:
+      - /mnt/nfs-shared/uploads:/config/uploads # NFS pour les fichiers utilisateur
+    networks:
+      - backend
+    ports:
+      - "8080:80" # Port pour le débogage local (facultatif)
+
+networks:
+  backend:
+    driver: bridge
+```
+4. Pour tester que le conteneur démarre :
+   ```bash
+   docker-compose up -d
+   ```
+
+#### 2. Reverse Proxy
+1. Installer Docker et Docker Compose :
+   ```bash
+    sudo apt update
+    sudo apt install -y docker.io docker-compose
+    sudo systemctl enable --now docker
+    sudo usermod -aG docker $USER
+   ```
+2. Placer le fichier `docker-compose.yml` pour Nginx.
 ```yaml
 version: '3.8'
 
@@ -132,64 +153,42 @@ networks:
   backend:
     driver: bridge
 ```
+Créer un fichier de conf `nginx.conf`
+```
+server {
+    listen 80;
+    server_name 192.168.64.4;
 
-3. Démarrez Nginx :
-
-```bash
-docker-compose up -d
+    location / {
+        proxy_pass http://bookstack:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 ```
 
-### 2. Déploiement de BookStack
+3. Démarrez le reverse proxy :
+   ```bash
+   docker-compose up -d
+   ```
+4. Configurez les règles de pare-feu pour n’autoriser que les ports 80 et 443 en accès externe.
 
-#### Création d'un volume partagé
 
-1. Configurez un stockage partagé (NFS ou GlusterFS) pour les fichiers téléchargés par les utilisateurs.
-2. Montez le volume partagé sur les serveurs hébergeant les réplicas BookStack.
-
-#### Configuration des réplicas
-
-1. Créez un fichier `docker-compose.yml` pour BookStack sur chaque serveur d’application :
-
-```yaml
-version: '3.8'
-
-services:
-  bookstack:
-    image: linuxserver/bookstack
-    container_name: bookstack_replica
-    environment:
-      - DB_HOST=192.168.64.6 # IP de la VM base de données
-      - DB_USER=bookstack
-      - DB_PASS=password
-      - DB_DATABASE=bookstack
-      - APP_URL=http://192.168.64.4 # URL du reverse proxy
-      - APP_KEY=base64:BE4aoEklcVGIb+cLYOauITaK4RJEOAFq5y64t/eodOo= #docker run -it --rm --entrypoint /bin/bash lscr.io/linuxserver/bookstack:latest appkey
-    volumes:
-      - /mnt/shared-storage/uploads:/config/uploads # NFS pour les fichiers utilisateur
-    networks:
-      - backend
-    ports:
-      - "8080:80" # Port pour le débogage local (facultatif)
-
-networks:
-  backend:
-    driver: bridge
-```
-
-2. Démarrez BookStack :
-
-```bash
-docker-compose up -d
-```
-
-3. Répétez cette opération sur le second serveur d’application.
-
-### 3. Base de données MySQL/MariaDB en Haute Disponibilité
-
-#### Option 1 : Configuration Standard
-
-1. Créez un fichier `docker-compose.yml` :
-
+#### 3. Base de Données
+1. Installer Docker et Docker Compose :
+   ```bash
+    sudo apt update
+    sudo apt install -y docker.io docker-compose
+    sudo systemctl enable --now docker
+    sudo usermod -aG docker $USER
+   ```
+2. Créez un volume local pour les données de la base de données :
+   ```bash
+   mkdir -p /mnt/db_data
+   ```
+3. Placez le fichier `docker-compose.yml` pour MariaDB.
 ```yaml
 version: '3.8'
 services:
@@ -210,105 +209,186 @@ networks:
   db_network:
     driver: bridge
 ```
+4. Démarrez les services :
+   ```bash
+   docker-compose up -d
+   ```
+Cette requête à aboutie sur cette erreur : 
+ERROR: toomanyrequests: You have reached your pull rate limit. You may increase the limit by authenticating and upgrading: 
+https://www.docker.com/increase-rate-limit
 
-2. Lancez le conteneur :
-
+On a donc du faire : 
 ```bash
-docker-compose up -d
+docker login
 ```
-
-#### Option 2 : Cluster MySQL/MariaDB (Docker Swarm)
-
-1. Initiez un cluster Docker Swarm :
-
-```bash
-docker swarm init
-```
-
-2. Configurez un cluster MySQL/MariaDB avec Galera ou autre outil de réplication en haute disponibilité (documentation dédiée).
-
-### 4. Sauvegardes
-
-#### Base de données
-
-1. Installez un outil de sauvegarde comme `mysqldump` :
-
-```bash
-mysqldump -u root -p bookstack > /backups/bookstack_backup.sql
-```
-
-2. Planifiez des sauvegardes régulières avec un cron job :
-
-```bash
-crontab -e
-```
-
-Ajoutez une ligne :
-
-```bash
-0 2 * * * docker exec mariadb sh -c 'exec mysqldump -u root -p"rootpassword" bookstack' > /backups/backup.sql
-```
-
-#### Fichiers
-
-1. Utilisez `rsync` pour copier les fichiers du volume partagé vers un emplacement sécurisé :
-
-```bash
-rsync -avz /mnt/shared-storage /backups/uploads
-```
-
-2. Planifiez avec cron :
-
-```bash
-crontab -e
-```
-
-Ajoutez une ligne :
-
-```bash
-0 3 * * * rsync -avz /mnt/shared-storage /backups/uploads
-```
-
-### 5. Monitoring et Health Checks
-
-1. Configurez des health checks Docker pour chaque service :
-
-Dans `docker-compose.yml` :
-
-```yaml
-healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost"]
-  interval: 30s
-  timeout: 10s
-  retries: 3
-```
-
-2. Installez un outil comme Prometheus + Grafana pour surveiller les performances.
+5. Configurez des sauvegardes automatiques :
+   - Ajoutez un cron job pour effectuer des sauvegardes régulières :
+     ```bash
+     crontab -e
+     ```
+     Exemple de commande pour une sauvegarde quotidienne :
+     ```bash
+     0 2 * * * docker exec mariadb sh -c 'exec mysqldump -u root -p"rootpassword" bookstack' > /backups/backup.sql
+     ```
 
 ---
 
-## Fichiers fournis
+#### Docker Swarm
 
-- `docker-compose.yml` pour Nginx.
-- `docker-compose.yml` pour BookStack.
-- Scripts de sauvegarde.
+1. Initier un cluster Docker Swarm sur le reverse-proxy
+```bash
+docker swarm init --advertise-addr 192.168.64.4
+```
+
+2. Rejoindre le swarm avec les autres VMs : 
+```bash
+docker swarm join <TOKEN> 192.168.64.4
+```
+
+Remplacer le `docker-compose.yml` du reverse proxy par : 
+```yml
+version: '3.8'
+
+services:
+  bookstack:
+    image: linuxserver/bookstack
+    environment:
+      - DB_HOST=192.168.64.6
+      - DB_USER=bookstack
+      - DB_PASS=securepassword
+      - DB_DATABASE=bookstack
+      - APP_URL=http://192.168.64.4
+    volumes:
+      - /mnt/shared-storage/uploads:/config/uploads
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+    networks:
+      - backend
+
+  reverse_proxy:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+    networks:
+      - backend
+
+  db:
+    image: mariadb:10.11
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=bookstack
+      - MYSQL_USER=bookstack
+      - MYSQL_PASSWORD=securepassword
+    volumes:
+      - /mnt/db_data:/var/lib/mysql
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.role == manager]
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: overlay
+```
+
+Demarrer les services : 
+```bash
+docker stack deploy -c docker-compose.yml bookstack_stack
+```
+
+Une fois tout cela fait, nous avons une erreur au démarrage des services : 
+```
+Waiting for DB to be available
+Illuminate\Database\QueryException 
+
+SQLSTATE[HY000] [1045] Access denied for user 'database_username'@'10.0.1.173' (using password: YES) (Connection: mysql, SQL: select table_name as `name`, (data_length + index_length) as `size`, table_comment as `comment`, engine as `engine`, table_collation as `collation` from information_schema.tables where table_schema = 'bookstack' and table_type in ('BASE TABLE', 'SYSTEM VERSIONED') order by table_name)
+```
+
+on essaye des commandes tel que : 
+```
+GRANT ALL PRIVILEGES ON bookstack.* TO 'bookstack'@'%' IDENTIFIED BY 'password';
+FLUSH PRIVILEGES;
+```
+
+## Points Optionnels (non mis en place actuellement)
+
+- Configurer un cluster MariaDB haute disponibilité si possible.
+- Ajouter un système d’alerte avec Prometheus ou Grafana.
+
+
+## **Vérifications et Tests**
+### Liste des Services
+```bash
+docker service ls
+```
+### Vérification des Réplicas
+```bash
+docker service ps bookstack_stack_bookstack
+```
+### Surveiller les conteneurs : 
+```bash
+docker ps
+```
+### Consulter log service spécifiques : 
+```bash
+docker service logs bookstack_stack_bookstack
+```
+
+### Accès à la Base de Données depuis un Replica
+1. Connectez-vous au conteneur :
+   ```bash
+   docker exec -it $(docker ps --filter "name=bookstack_stack_bookstack.1" -q) bash
+   ```
+2. Testez la connexion :
+   ```bash
+   mysql -h db -u bookstack -p --ssl-mode=DISABLED
+   ```
+
+### Consultation des Logs des Services
+- **BookStack** :
+  ```bash
+  docker service logs -f bookstack_stack_bookstack
+  ```
+- **MariaDB** :
+  ```bash
+  docker service logs -f bookstack_stack_db
+  ```
+- **Reverse Proxy** :
+  ```bash
+  docker service logs -f bookstack_stack_reverse_proxy
+  ```
 
 ---
 
-## Points Optionnels
-
-- Configurez un cluster MySQL/MariaDB haute disponibilité si possible.
-- Ajoutez un système d’alerte avec Prometheus ou Grafana.
+## **Résolution des Problèmes Identifiés**
+- Ajustement des permissions NFS :
+  ```bash
+  sudo chown -R 911:911 /srv/nfs_share/uploads
+  sudo chmod -R 775 /srv/nfs_share/uploads
+  ```
+- Vérification des privilèges MariaDB :
+  ```sql
+  GRANT ALL PRIVILEGES ON bookstack.* TO 'bookstack'@'%' IDENTIFIED BY 'password';
+  FLUSH PRIVILEGES;
+  ```
+- Désactivation de SSL si nécessaire :
+  ```bash
+  mysql -h db -u bookstack -p --ssl-mode=DISABLED
+  ```
 
 ---
 
-## Tests de Validation
-
-1. Accédez à BookStack via le domaine configuré.
-2. Téléchargez des fichiers et vérifiez leur présence sur les deux réplicas.
-3. Déconnectez un réplica pour tester la résilience.
-4. Restaurer une sauvegarde de la base de données et des fichiers.
-
----
-
-En suivant cette documentation, vous disposerez d’une application BookStack hautement disponible et sécurisée.
+## **Conclusion**
+Ce rapport résume l’intégralité des étapes nécessaires pour configurer, déployer et tester l’application BookStack dans un environnement Docker Swarm. Avec ces commandes et ajustements, l’infrastructure est prête à être utilisée en production, avec une base solide pour une haute disponibilité et une évolutivité future.

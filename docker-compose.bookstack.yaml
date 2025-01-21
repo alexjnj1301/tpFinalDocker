@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  bookstack:
+    image: linuxserver/bookstack
+    container_name: bookstack_replica
+    environment:
+      - DB_HOST=192.168.64.6 # IP de la VM base de données
+      - DB_USER=bookstack
+      - DB_PASS=password
+      - DB_DATABASE=bookstack
+      - APP_URL=http://192.168.64.4 # URL du reverse proxy
+      - APP_KEY=base64:BE4aoEklcVGIb+cLYOauITaK4RJEOAFq5y64t/eodOo=
+    volumes:
+      - /mnt/shared-storage/uploads:/config/uploads # NFS pour les fichiers utilisateur
+    networks:
+      - backend
+    ports:
+      - "8080:80" # Port pour le débogage local (facultatif)
+
+networks:
+  backend:
+    driver: bridge
+
